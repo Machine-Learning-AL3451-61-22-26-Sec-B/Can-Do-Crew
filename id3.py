@@ -9,84 +9,82 @@ class Node:
         self.result = result
         self.children = {}
 
-class DecisionTreeID3:
-    def __init__(self):
-        self.root = None
+def entropy(labels):
+    _, counts = np.unique(labels, return_counts=True)
+    probabilities = counts / len(labels)
+    entropy = -np.sum(probabilities * np.log2(probabilities))
+    return entropy
 
-    def entropy(self, data):
-        _, counts = np.unique(data, return_counts=True)
-        probabilities = counts / len(data)
-        return -np.sum(probabilities * np.log2(probabilities))
+def information_gain(data, feature_name, labels):
+    total_entropy = entropy(labels)
+    values, counts = np.unique(data[feature_name], return_counts=True)
+    weighted_entropy = np.sum([(counts[i] / np.sum(counts)) * entropy(labels[data[feature_name] == values[i]]) for i in range(len(values))])
+    information_gain = total_entropy - weighted_entropy
+    return information_gain
 
-    def information_gain(self, data, feature_name, target_name):
-        total_entropy = self.entropy(data[target_name])
-        unique_values = data[feature_name].unique()
-        weighted_entropy = 0
-        for value in unique_values:
-            subset = data[data[feature_name] == value]
-            weighted_entropy += len(subset) / len(data) * self.entropy(subset[target_name])
-        return total_entropy - weighted_entropy
+def build_tree(data, labels, features):
+    if len(np.unique(labels)) == 1:
+        return Node(result=labels.iloc[0])
+   
+    if len(features) == 0:
+        return Node(result=labels.mode()[0])
+   
+    max_gain = -1
+    best_feature = None
+    for feature in features:
+        gain = information_gain(data, feature, labels)
+        if gain > max_gain:
+            max_gain = gain
+            best_feature = feature
+   
+    root = Node(feature=best_feature)
+    values = np.unique(data[best_feature])
+    for value in values:
+        sub_data = data[data[best_feature] == value]
+        sub_labels = labels[data[best_feature] == value]
+        if len(sub_data) == 0:
+            root.children[value] = Node(result=labels.mode()[0])
+        else:
+            root.children[value] = build_tree(sub_data, sub_labels, [f for f in features if f != best_feature])
+    return root
 
-    def build_tree(self, data, features, target_name):
-        if len(data) == 0:
-            return None
-        if len(data[target_name].unique()) == 1:
-            return Node(result=data[target_name].iloc[0])
-
-        information_gains = [(feature, self.information_gain(data, feature, target_name)) for feature in features]
-        best_feature, _ = max(information_gains, key=lambda x: x[1])
-
-        root = Node(feature=best_feature)
-
-        for value in data[best_feature].unique():
-            subset = data[data[best_feature] == value]
-            root.children[value] = self.build_tree(subset, [f for f in features if f != best_feature], target_name)
-
-        return root
-
-    def fit(self, data, target_name):
-        features = [col for col in data.columns if col != target_name]
-        self.root = self.build_tree(data, features, target_name)
-
-    def predict_instance(self, instance, node):
-        if node.result is not None:
-            return node.result
-        value = instance[node.feature]
-        if value not in node.children:
-            return None
-        return self.predict_instance(instance, node.children[value])
-
-    def predict(self, data):
-        predictions = []
-        for index, row in data.iterrows():
-            result = self.predict_instance(row, self.root)
-            predictions.append(result)
-        return predictions
+def classify(root, sample):
+    if root.result is not None:
+        return root.result
+    value = sample[root.feature]
+    if value not in root.children:
+        return None
+    return classify(root.children[value], sample)
 
 def main():
-    st.title("Decision Tree ID3 with Streamlit")
+    st.title("Decision Tree Classifier with ID3 Algorithm")
+   
+    # Sample data
+    data = pd.DataFrame({
+        'Outlook': ['Sunny', 'Sunny', 'Overcast', 'Rainy', 'Rainy', 'Rainy', 'Overcast', 'Sunny', 'Sunny', 'Rainy'],
+        'Temperature': ['Hot', 'Hot', 'Hot', 'Mild', 'Cool', 'Cool', 'Cool', 'Mild', 'Cool', 'Mild'],
+        'Humidity': ['High', 'High', 'High', 'High', 'Normal', 'Normal', 'Normal', 'High', 'Normal', 'Normal'],
+        'Wind': ['Weak', 'Strong', 'Weak', 'Weak', 'Weak', 'Strong', 'Strong', 'Weak', 'Weak', 'Weak'],
+        'PlayTennis': ['No', 'No', 'Yes', 'Yes', 'Yes', 'No', 'Yes', 'No', 'Yes', 'Yes']
+    })
 
-    # Upload dataset file
-    uploaded_file = st.file_uploader("Upload Dataset", type=["csv"])
-    if uploaded_file is not None:
-        # Read the dataset
-        data = pd.read_csv(uploaded_file)
+    labels = data['PlayTennis']
+    features = data.columns[:-1]
 
-        # Check if 'PlayTennis' column exists in the dataset
-        if 'PlayTennis' not in data.columns:
-            st.error("Target column 'PlayTennis' not found in the uploaded dataset.")
-            return
+    # Build the decision tree
+    root = build_tree(data, labels, features)
 
-        # Initialize the DecisionTreeID3 model
-        model = DecisionTreeID3()
+    # Collect input from user
+    st.sidebar.header("Input")
+    sample = {}
+    for feature in features:
+        sample[feature] = st.sidebar.selectbox(feature, data[feature].unique())
 
-        # Train the model
-        model.fit(data, 'PlayTennis')
+    # Classify the input sample
+    classification = classify(root, sample)
 
-        # Make predictions
-        predictions = model.predict(data)
-
-        st.write("Predictions:", predictions)
+    # Display the result
+    st.write("Predicted class:", classification)
 
 if __name__ == "__main__":
     main()
